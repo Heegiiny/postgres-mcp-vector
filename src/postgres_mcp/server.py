@@ -33,6 +33,7 @@ from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
 from .top_queries import TopQueriesCalc
+from .vector_search import search_topics_vector_impl
 
 # Initialize FastMCP with default settings
 mcp = FastMCP("postgres-mcp")
@@ -518,6 +519,56 @@ async def analyze_db_health(
     health_tool = DatabaseHealthTool(await get_sql_driver())
     result = await health_tool.health(health_type=health_type)
     return format_text_response(result)
+
+
+@mcp.tool(
+    description="Semantic vector search. Embeds query via embeddings API, runs pgvector search. "
+    "Schema params (from_clause, extra_columns) are optional—use per system prompt for your DB.",
+    annotations=ToolAnnotations(
+        title="Search Topics (Vector)",
+        readOnlyHint=True,
+    ),
+)
+async def search_topics_vector(
+    query: str = Field(description="Search query string"),
+    from_clause: str = Field(
+        description="FROM clause, e.g. 'smf_topics' or 'smf_topics t LEFT JOIN smf_messages m ON t.id_first_msg = m.id_msg'",
+        default="smf_topics",
+    ),
+    embedding_column: str = Field(description="Vector column for distance", default="embedding_topic"),
+    id_column: str = Field(description="ID column", default="id_topic"),
+    extra_columns: str = Field(
+        description="Extra SELECT columns, e.g. 'subject, summary' or 'm.subject as subject, LEFT(m.body,200) as summary'",
+        default="subject, summary",
+    ),
+    limit: int = Field(description="Max results", default=5),
+    where_clause: str = Field(
+        description="Extra WHERE conditions, e.g. \"m.body != ''\" to skip empty messages",
+        default="",
+    ),
+) -> ResponseType:
+    """Semantic vector search over topics."""
+    try:
+        sql_driver = await get_sql_driver()
+        results = await search_topics_vector_impl(
+            sql_driver,
+            query,
+            from_clause=from_clause,
+            embedding_column=embedding_column,
+            id_column=id_column,
+            extra_columns=extra_columns,
+            limit=limit,
+            where_clause=where_clause,
+        )
+        if not results:
+            return format_text_response(
+                "No results. Check: 1) embeddings API running 2) embedding_topic populated "
+                "(same model as EMBEDDINGS_MODEL) 3) run: SELECT COUNT(*), COUNT(embedding_topic) FROM smf_topics"
+            )
+        return format_text_response(results)
+    except Exception as e:
+        logger.error(f"Error in vector search: {e}")
+        return format_error_response(str(e))
 
 
 @mcp.tool(

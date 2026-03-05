@@ -5,6 +5,7 @@ description = "PostgreSQL Tuning and Analysis Tool"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "httpx>=0.28.0",
     "mcp[cli]>=1.25.0",
     "psycopg[binary]>=3.3.2",
     "humanize>=4.15.0",
